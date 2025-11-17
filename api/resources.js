@@ -1,6 +1,9 @@
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 
+// Set graphics mode to false for serverless environments
+chromium.setGraphicsMode(false);
+
 module.exports = async (req, res) => {
   // Enable CORS for Google Sites
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -11,11 +14,20 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
+  let browser;
   try {
-    const browser = await puppeteer.launch({
-      args: chromium.args,
+    const executablePath = await chromium.executablePath();
+    
+    browser = await puppeteer.launch({
+      args: [
+        ...chromium.args,
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-setuid-sandbox',
+        '--no-sandbox',
+      ],
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
+      executablePath: executablePath,
       headless: chromium.headless,
     });
 
@@ -84,6 +96,16 @@ module.exports = async (req, res) => {
 
   } catch (error) {
     console.error('Scraping error:', error);
+    
+    // Ensure browser is closed on error
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error('Error closing browser:', closeError);
+      }
+    }
+    
     res.status(500).json({
       success: false,
       error: error.message
