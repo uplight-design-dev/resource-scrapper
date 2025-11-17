@@ -34,51 +34,118 @@ module.exports = async (req, res) => {
     const page = await browser.newPage();
     await page.goto('https://uplight.com/library/', {
       waitUntil: 'networkidle2',
-      timeout: 30000
+      timeout: 60000
     });
 
-    // Wait for resources to load
-    await page.waitForSelector('[class*="resource"], [class*="card"], [class*="item"]', {
-      timeout: 10000
-    }).catch(() => {});
+    // Wait for page to fully load
+    await page.waitForTimeout(3000);
 
-    // Extract resource data
+    // Scroll to load all resources (handles lazy loading)
+    let lastHeight = await page.evaluate('document.body.scrollHeight');
+    let scrollAttempts = 0;
+    const maxScrolls = 15;
+
+    while (scrollAttempts < maxScrolls) {
+      await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
+      await page.waitForTimeout(2000);
+      
+      const newHeight = await page.evaluate('document.body.scrollHeight');
+      if (newHeight === lastHeight) break;
+      lastHeight = newHeight;
+      scrollAttempts++;
+    }
+
+    // Scroll back to top
+    await page.evaluate('window.scrollTo(0, 0)');
+    await page.waitForTimeout(1000);
+
+    // Extract resource data - find all links to library resources
     const resources = await page.evaluate(() => {
       const items = [];
+      const seenUrls = new Set();
+
+      // Find all links that point to library resources
+      const allLinks = document.querySelectorAll('a[href*="/library/"]');
       
-      // Try multiple selectors to find resource elements
-      const selectors = [
-        'article',
-        '[class*="resource"]',
-        '[class*="card"]',
-        '[class*="item"]',
-        '[data-resource]'
-      ];
-
-      let elements = [];
-      for (const selector of selectors) {
-        elements = document.querySelectorAll(selector);
-        if (elements.length > 0) break;
-      }
-
-      elements.forEach((element) => {
-        // Find thumbnail image
-        const img = element.querySelector('img');
-        const thumbnail = img ? img.src || img.getAttribute('data-src') : null;
-
-        // Find title
-        const titleElement = element.querySelector('h1, h2, h3, h4, [class*="title"], a[href]');
-        const title = titleElement ? titleElement.textContent.trim() : '';
-
-        // Only add if we have both thumbnail and title
-        if (thumbnail && title) {
-          items.push({
-            id: items.length + 1,
-            title: title,
-            thumbnail: thumbnail,
-            url: element.querySelector('a')?.href || ''
-          });
+      allLinks.forEach((link) => {
+        const href = link.getAttribute('href');
+        if (!href || href.includes('#') || seenUrls.has(href)) return;
+        
+        // Skip navigation and filter links
+        if (href.includes('/filter') || href.includes('/category') || href === '/library/') return;
+        
+        seenUrls.add(href);
+        
+        // Get the full URL
+        const fullUrl = href.startsWith('http') ? href : `https://uplight.com${href}`;
+        
+        // Find the container element (could be parent, grandparent, etc.)
+        let container = link;
+        for (let i = 0; i < 5; i++) {
+          container = container.parentElement;
+          if (!container) break;
+          
+          // Look for common container patterns
+          const className = container.className || '';
+          if (className.includes('card') || className.includes('item') || 
+              className.includes('resource') || className.includes('post') ||
+              container.tagName === 'ARTICLE' || container.tagName === 'LI') {
+            break;
+          }
         }
+        
+        // Extract title - try multiple methods
+        let title = '';
+        
+        // Method 1: Look for heading elements
+        const heading = container.querySelector('h1, h2, h3, h4, h5, h6, [class*="title"], [class*="Title"]');
+        if (heading) {
+          title = heading.textContent.trim();
+        }
+        
+        // Method 2: Use link text if it's substantial
+        if (!title || title.length < 5) {
+          const linkText = link.textContent.trim();
+          if (linkText && linkText.length > 5 && linkText.length < 200) {
+            title = linkText;
+          }
+        }
+        
+        // Method 3: Look for any text content in container
+        if (!title || title.length < 5) {
+          const containerText = container.textContent.trim();
+          const lines = containerText.split('\n').map(l => l.trim()).filter(l => l.length > 5);
+          if (lines.length > 0) {
+            title = lines[0].substring(0, 200);
+          }
+        }
+        
+        // Skip if no title found
+        if (!title || title.length < 3) return;
+        
+        // Extract thumbnail - try multiple sources
+        let thumbnail = null;
+        
+        // Look for images in the container
+        const img = container.querySelector('img');
+        if (img) {
+          thumbnail = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('srcset')?.split(' ')[0];
+          
+          // Convert relative URLs to absolute
+          if (thumbnail && thumbnail.startsWith('/')) {
+            thumbnail = `https://uplight.com${thumbnail}`;
+          }
+        }
+        
+        // Clean up title (remove extra whitespace, newlines)
+        title = title.replace(/\s+/g, ' ').trim();
+        
+        items.push({
+          id: items.length + 1,
+          title: title,
+          thumbnail: thumbnail,
+          url: fullUrl
+        });
       });
 
       return items;
