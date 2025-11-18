@@ -1,35 +1,42 @@
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
+const fs = require('fs');
+const path = require('path');
 
-// Set graphics mode to false for serverless environments
-chromium.setGraphicsMode(false);
-
-module.exports = async (req, res) => {
-  // Enable CORS for Google Sites
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
+// For local development, use regular puppeteer
+// For production, this would be run via API endpoint
+async function generateJSON() {
   let browser;
   try {
-    const executablePath = await chromium.executablePath();
-    
-    browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--disable-setuid-sandbox',
-        '--no-sandbox',
-      ],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: executablePath,
-      headless: chromium.headless,
-    });
+    // Try to use chromium for serverless, fallback to regular puppeteer for local
+    let executablePath;
+    try {
+      chromium.setGraphicsMode(false);
+      executablePath = await chromium.executablePath();
+    } catch (e) {
+      // Local development - use system Chrome or install puppeteer
+      const puppeteerFull = require('puppeteer');
+      executablePath = null; // Use default
+      browser = await puppeteerFull.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
+    }
+
+    if (!browser) {
+      browser = await puppeteer.launch({
+        args: [
+          ...chromium.args,
+          '--disable-gpu',
+          '--disable-dev-shm-usage',
+          '--disable-setuid-sandbox',
+          '--no-sandbox',
+        ],
+        defaultViewport: chromium.defaultViewport,
+        executablePath: executablePath,
+        headless: chromium.headless,
+      });
+    }
 
     const page = await browser.newPage();
     await page.goto('https://uplight.com/library/', {
@@ -37,63 +44,62 @@ module.exports = async (req, res) => {
       timeout: 60000
     });
 
-    // Wait for page to fully load
     await page.waitForTimeout(3000);
 
-    // Scroll to load all resources (handles lazy loading)
+    // Scroll to load all resources
     let lastHeight = await page.evaluate('document.body.scrollHeight');
     let scrollAttempts = 0;
-    const maxScrolls = 15;
+    const maxScrolls = 50; // More scrolls for 800+ items
+    let noChangeCount = 0;
 
     while (scrollAttempts < maxScrolls) {
       await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(2500);
       
       const newHeight = await page.evaluate('document.body.scrollHeight');
-      if (newHeight === lastHeight) break;
+      if (newHeight === lastHeight) {
+        noChangeCount++;
+        if (noChangeCount >= 3) break;
+      } else {
+        noChangeCount = 0;
+      }
       lastHeight = newHeight;
       scrollAttempts++;
     }
 
-    // Scroll back to top
     await page.evaluate('window.scrollTo(0, 0)');
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
 
-    // Wait for library items to load
     await page.waitForSelector('div.library__item', {
       timeout: 15000
     }).catch(() => {});
 
-    // Extract resource data - use the specific library__item selector
+    // Extract resource data
     const resources = await page.evaluate(() => {
       const items = [];
+      const seenUrls = new Set();
       
-      // Find all library items (both active and inactive)
       const libraryItems = document.querySelectorAll('div.library__item');
       
       libraryItems.forEach((item, index) => {
-        // Find the link within the item
         const link = item.querySelector('a[href]');
         if (!link) return;
         
         const href = link.getAttribute('href');
         if (!href || href === '#' || href === '/library/') return;
-        
-        // Skip filter and category links
         if (href.includes('/filter') || href.includes('/category')) return;
         
-        // Get the full URL
         const fullUrl = href.startsWith('http') ? href : `https://uplight.com${href}`;
+        if (seenUrls.has(fullUrl)) return;
+        seenUrls.add(fullUrl);
         
-        // Extract title - look for heading or use link text
+        // Extract title
         let title = '';
         const heading = item.querySelector('h1, h2, h3, h4, h5, h6, [class*="title"], [class*="Title"]');
         if (heading) {
           title = heading.textContent.trim();
         } else {
-          // Try to find title in link or nearby text
           title = link.textContent.trim();
-          // If link text is too short, look for other text in the item
           if (!title || title.length < 5) {
             const itemText = item.textContent.trim();
             const lines = itemText.split('\n').map(l => l.trim()).filter(l => l.length > 5);
@@ -103,7 +109,6 @@ module.exports = async (req, res) => {
           }
         }
         
-        // Skip if no title
         if (!title || title.length < 3) return;
         
         // Extract thumbnail
@@ -111,14 +116,12 @@ module.exports = async (req, res) => {
         const img = item.querySelector('img');
         if (img) {
           thumbnail = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('srcset')?.split(' ')[0];
-          
-          // Convert relative URLs to absolute
           if (thumbnail && thumbnail.startsWith('/')) {
             thumbnail = `https://uplight.com${thumbnail}`;
           }
         }
         
-        // Extract item type (Press Release, Blog, etc.)
+        // Extract item type
         let itemType = '';
         const itemText = item.textContent || '';
         const typePatterns = [
@@ -126,16 +129,14 @@ module.exports = async (req, res) => {
           'Video', 'White Paper', 'Article', 'Brief', 'Podcast'
         ];
         
-        // Look for type in the item text (usually appears early in the text)
         for (const type of typePatterns) {
           const typeIndex = itemText.indexOf(type);
-          if (typeIndex !== -1 && typeIndex < 300) { // Type usually appears in first 300 chars
+          if (typeIndex !== -1 && typeIndex < 300) {
             itemType = type;
             break;
           }
         }
         
-        // Also check for type in specific elements
         if (!itemType) {
           const typeElements = item.querySelectorAll('span, div, p, [class*="type"], [class*="Type"], [class*="badge"], [class*="Badge"]');
           for (const el of typeElements) {
@@ -150,7 +151,6 @@ module.exports = async (req, res) => {
           }
         }
         
-        // Clean up title
         title = title.replace(/\s+/g, ' ').trim();
         
         items.push({
@@ -167,18 +167,39 @@ module.exports = async (req, res) => {
 
     await browser.close();
 
-    // Cache the response for 1 hour
-    res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate');
-    res.status(200).json({
-      success: true,
-      count: resources.length,
-      resources: resources
+    // Remove duplicates
+    const uniqueResources = [];
+    const urlSet = new Set();
+    resources.forEach(resource => {
+      if (!urlSet.has(resource.url)) {
+        urlSet.add(resource.url);
+        uniqueResources.push(resource);
+      }
     });
 
+    // Write JSON file to public folder
+    const jsonData = {
+      success: true,
+      count: uniqueResources.length,
+      lastUpdated: new Date().toISOString(),
+      resources: uniqueResources
+    };
+
+    const publicDir = path.join(__dirname, '..', 'public');
+    if (!fs.existsSync(publicDir)) {
+      fs.mkdirSync(publicDir, { recursive: true });
+    }
+
+    const jsonPath = path.join(publicDir, 'resources.json');
+    fs.writeFileSync(jsonPath, JSON.stringify(jsonData, null, 2));
+
+    console.log(`✅ Generated resources.json with ${uniqueResources.length} resources`);
+    console.log(`📁 Saved to: ${jsonPath}`);
+
+    return jsonData;
+
   } catch (error) {
-    console.error('Scraping error:', error);
-    
-    // Ensure browser is closed on error
+    console.error('Error generating JSON:', error);
     if (browser) {
       try {
         await browser.close();
@@ -186,11 +207,22 @@ module.exports = async (req, res) => {
         console.error('Error closing browser:', closeError);
       }
     }
-    
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    throw error;
   }
-};
+}
+
+// Run if called directly
+if (require.main === module) {
+  generateJSON()
+    .then(() => {
+      console.log('✅ JSON generation complete');
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('❌ JSON generation failed:', error);
+      process.exit(1);
+    });
+}
+
+module.exports = generateJSON;
 
