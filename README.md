@@ -41,7 +41,7 @@ The widget loads resources from the GitHub raw URL. To embed:
    - Use the iframe code from `public/embed-code.html`:
    ```html
    <iframe 
-     src="https://raw.githubusercontent.com/uplight-design-dev/resource-scrapper/main/public/widget.html" 
+     src="https://resource-scrapper.vercel.app/widget.html" 
      width="100%" 
      height="800" 
      frameborder="0" 
@@ -49,8 +49,6 @@ The widget loads resources from the GitHub raw URL. To embed:
      style="border: none; overflow: hidden;">
    </iframe>
    ```
-
-**Note:** Update the GitHub URL in the iframe to match your repository.
 
 ### API Endpoints
 
