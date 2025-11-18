@@ -1,29 +1,26 @@
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
 const fs = require('fs');
 const path = require('path');
 
-// For local development, use regular puppeteer
-// For production, this would be run via API endpoint
+// For local development, try puppeteer first, then puppeteer-core
 async function generateJSON() {
   let browser;
+  let puppeteer;
+  
   try {
-    // Try to use chromium for serverless, fallback to regular puppeteer for local
-    let executablePath;
+    // Try regular puppeteer first (for local development)
     try {
-      chromium.setGraphicsMode(false);
-      executablePath = await chromium.executablePath();
-    } catch (e) {
-      // Local development - use system Chrome or install puppeteer
-      const puppeteerFull = require('puppeteer');
-      executablePath = null; // Use default
-      browser = await puppeteerFull.launch({
+      puppeteer = require('puppeteer');
+      browser = await puppeteer.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
       });
-    }
-
-    if (!browser) {
+    } catch (e) {
+      // Fallback to puppeteer-core with chromium
+      const chromium = require('@sparticuz/chromium');
+      chromium.setGraphicsMode(false);
+      puppeteer = require('puppeteer-core');
+      const executablePath = await chromium.executablePath();
+      
       browser = await puppeteer.launch({
         args: [
           ...chromium.args,
@@ -38,23 +35,26 @@ async function generateJSON() {
       });
     }
 
+    // Wait helper function (replaces deprecated waitForTimeout)
+    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    
     const page = await browser.newPage();
     await page.goto('https://uplight.com/library/', {
       waitUntil: 'networkidle2',
       timeout: 60000
     });
 
-    await page.waitForTimeout(3000);
+    await wait(3000);
 
     // Scroll to load all resources
     let lastHeight = await page.evaluate('document.body.scrollHeight');
     let scrollAttempts = 0;
     const maxScrolls = 50; // More scrolls for 800+ items
     let noChangeCount = 0;
-
+    
     while (scrollAttempts < maxScrolls) {
       await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
-      await page.waitForTimeout(2500);
+      await wait(2500);
       
       const newHeight = await page.evaluate('document.body.scrollHeight');
       if (newHeight === lastHeight) {
@@ -68,7 +68,7 @@ async function generateJSON() {
     }
 
     await page.evaluate('window.scrollTo(0, 0)');
-    await page.waitForTimeout(2000);
+    await wait(2000);
 
     await page.waitForSelector('div.library__item', {
       timeout: 15000

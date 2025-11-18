@@ -131,6 +131,8 @@
     (function() {
       // Load from GitHub raw URL - update this with your repo URL
       const GITHUB_RAW_URL = 'https://raw.githubusercontent.com/uplight-design-dev/resource-scrapper/main/public/resources.json';
+      // Fallback to API endpoint
+      const API_URL = window.location.origin + '/api/resources';
       // Fallback to local if running locally
       const JSON_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
         ? '/resources.json' 
@@ -139,23 +141,55 @@
       let allResources = [];
       let filteredResources = [];
 
-      // Fetch resources from JSON file
+      // Fetch resources from JSON file with fallback to API
       async function fetchResources() {
         try {
+          // Try GitHub first
           const response = await fetch(JSON_URL);
           const data = await response.json();
           
-          if (data.success && data.resources) {
+          // If GitHub has no resources or fails, try API
+          if (!data.success || !data.resources || data.resources.length === 0) {
+            console.log('GitHub JSON empty or invalid, trying API...');
+            const apiResponse = await fetch(API_URL);
+            const apiData = await apiResponse.json();
+            
+            if (apiData.success && apiData.resources && apiData.resources.length > 0) {
+              allResources = apiData.resources;
+              filteredResources = allResources;
+              renderResources();
+              updateResultsCount();
+              return;
+            }
+          }
+          
+          if (data.success && data.resources && data.resources.length > 0) {
             allResources = data.resources;
             filteredResources = allResources;
             renderResources();
             updateResultsCount();
           } else {
-            showError('Failed to load resources');
+            showError('No resources available. Please generate resources.json or check the API.');
           }
         } catch (error) {
-          console.error('Error fetching resources:', error);
-          showError('Error loading resources. Please try again later.');
+          console.error('Error fetching from GitHub, trying API...', error);
+          // Fallback to API
+          try {
+            const apiResponse = await fetch(API_URL);
+            const apiData = await apiResponse.json();
+            
+            if (apiData.success && apiData.resources) {
+              allResources = apiData.resources;
+              filteredResources = allResources;
+              renderResources();
+              updateResultsCount();
+            } else {
+              showError('Error loading resources. Please try again later.');
+            }
+          } catch (apiError) {
+            console.error('Error fetching from API:', apiError);
+            showError('Error loading resources. Please try again later.');
+          }
         }
       }
 

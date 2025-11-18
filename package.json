@@ -9,12 +9,12 @@
     "generate-json": "node scripts/generate-json.js"
   },
   "dependencies": {
-    "puppeteer-core": "^21.5.0",
     "@sparticuz/chromium": "^131.0.0",
-    "cheerio": "^1.0.0-rc.12"
+    "cheerio": "^1.0.0-rc.12",
+    "puppeteer-core": "^21.5.0"
   },
   "devDependencies": {
+    "puppeteer": "^24.30.0",
     "vercel": "^33.0.0"
   }
 }
-
