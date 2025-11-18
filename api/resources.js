@@ -59,75 +59,56 @@ module.exports = async (req, res) => {
     await page.evaluate('window.scrollTo(0, 0)');
     await page.waitForTimeout(1000);
 
-    // Extract resource data - find all links to library resources
+    // Wait for library items to load
+    await page.waitForSelector('div.library__item', {
+      timeout: 15000
+    }).catch(() => {});
+
+    // Extract resource data - use the specific library__item selector
     const resources = await page.evaluate(() => {
       const items = [];
-      const seenUrls = new Set();
-
-      // Find all links that point to library resources
-      const allLinks = document.querySelectorAll('a[href*="/library/"]');
       
-      allLinks.forEach((link) => {
+      // Find all library items (both active and inactive)
+      const libraryItems = document.querySelectorAll('div.library__item');
+      
+      libraryItems.forEach((item, index) => {
+        // Find the link within the item
+        const link = item.querySelector('a[href]');
+        if (!link) return;
+        
         const href = link.getAttribute('href');
-        if (!href || href.includes('#') || seenUrls.has(href)) return;
+        if (!href || href === '#' || href === '/library/') return;
         
-        // Skip navigation and filter links
-        if (href.includes('/filter') || href.includes('/category') || href === '/library/') return;
-        
-        seenUrls.add(href);
+        // Skip filter and category links
+        if (href.includes('/filter') || href.includes('/category')) return;
         
         // Get the full URL
         const fullUrl = href.startsWith('http') ? href : `https://uplight.com${href}`;
         
-        // Find the container element (could be parent, grandparent, etc.)
-        let container = link;
-        for (let i = 0; i < 5; i++) {
-          container = container.parentElement;
-          if (!container) break;
-          
-          // Look for common container patterns
-          const className = container.className || '';
-          if (className.includes('card') || className.includes('item') || 
-              className.includes('resource') || className.includes('post') ||
-              container.tagName === 'ARTICLE' || container.tagName === 'LI') {
-            break;
-          }
-        }
-        
-        // Extract title - try multiple methods
+        // Extract title - look for heading or use link text
         let title = '';
-        
-        // Method 1: Look for heading elements
-        const heading = container.querySelector('h1, h2, h3, h4, h5, h6, [class*="title"], [class*="Title"]');
+        const heading = item.querySelector('h1, h2, h3, h4, h5, h6, [class*="title"], [class*="Title"]');
         if (heading) {
           title = heading.textContent.trim();
-        }
-        
-        // Method 2: Use link text if it's substantial
-        if (!title || title.length < 5) {
-          const linkText = link.textContent.trim();
-          if (linkText && linkText.length > 5 && linkText.length < 200) {
-            title = linkText;
+        } else {
+          // Try to find title in link or nearby text
+          title = link.textContent.trim();
+          // If link text is too short, look for other text in the item
+          if (!title || title.length < 5) {
+            const itemText = item.textContent.trim();
+            const lines = itemText.split('\n').map(l => l.trim()).filter(l => l.length > 5);
+            if (lines.length > 0) {
+              title = lines[0].substring(0, 200);
+            }
           }
         }
         
-        // Method 3: Look for any text content in container
-        if (!title || title.length < 5) {
-          const containerText = container.textContent.trim();
-          const lines = containerText.split('\n').map(l => l.trim()).filter(l => l.length > 5);
-          if (lines.length > 0) {
-            title = lines[0].substring(0, 200);
-          }
-        }
-        
-        // Skip if no title found
+        // Skip if no title
         if (!title || title.length < 3) return;
         
-        // Extract thumbnail - try multiple sources
+        // Extract thumbnail
         let thumbnail = null;
-        
-        // Look for images in the container
-        const img = container.querySelector('img');
+        const img = item.querySelector('img');
         if (img) {
           thumbnail = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('srcset')?.split(' ')[0];
           
@@ -137,11 +118,11 @@ module.exports = async (req, res) => {
           }
         }
         
-        // Clean up title (remove extra whitespace, newlines)
+        // Clean up title
         title = title.replace(/\s+/g, ' ').trim();
         
         items.push({
-          id: items.length + 1,
+          id: index + 1,
           title: title,
           thumbnail: thumbnail,
           url: fullUrl
