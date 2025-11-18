@@ -69,6 +69,12 @@
       background: #f5f5f5;
     }
 
+    /* Special styling for Press Release logos */
+    .resource-thumbnail.press-release {
+      object-fit: contain;
+      padding: 8px;
+    }
+
     .resource-title {
       padding: 12px;
       font-size: 14px;
@@ -207,7 +213,8 @@
           const type = resource.type || 'Resource';
           const title = escapeHtml(resource.title);
           const url = resource.url || '#';
-          return `<div class="resource-card" onclick="window.open('${url}','_blank')"><img src="${img}" alt="${title}" class="resource-thumbnail" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'150\'%3E%3Crect fill=\'%23f5f5f5\' width=\'200\' height=\'150\'/%3E%3C/svg%3E'"/><div class="resource-title"><span class="resource-type">${escapeHtml(type)}</span>${title}</div></div>`;
+          const thumbnailClass = type.toLowerCase() === 'press release' ? 'resource-thumbnail press-release' : 'resource-thumbnail';
+          return `<div class="resource-card" onclick="window.open('${url}','_blank')"><img src="${img}" alt="${title}" class="${thumbnailClass}" loading="lazy" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'150\'%3E%3Crect fill=\'%23f5f5f5\' width=\'200\' height=\'150\'/%3E%3C/svg%3E'"/><div class="resource-title"><span class="resource-type">${escapeHtml(type)}</span>${title}</div></div>`;
         }).join('') + '</div>';
       }
 
