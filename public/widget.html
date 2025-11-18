@@ -4,6 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
+    @font-face {
+      font-family: 'MarkOT';
+      src: url('/fonts/MarkOT-Bold.otf') format('opentype');
+      font-weight: bold;
+      font-style: normal;
+    }
+    
+    @font-face {
+      font-family: 'MarkOT';
+      src: url('/fonts/MarkOT-Medium.otf') format('opentype');
+      font-weight: 500;
+      font-style: normal;
+    }
+    
     * {
       margin: 0;
       padding: 0;
@@ -50,7 +64,7 @@
 
     .resource-card {
       background: white;
-      border-radius: 8px;
+      border-radius: 0;
       overflow: hidden;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
       transition: transform 0.2s, box-shadow 0.2s;
@@ -79,18 +93,20 @@
     .resource-title {
       padding: 12px;
       font-size: 14px;
-      font-weight: 500;
-      color: #333;
+      font-family: 'MarkOT', sans-serif;
+      font-weight: bold;
+      color: #0047FF;
       line-height: 1.4;
     }
 
     .resource-type {
       display: block;
       font-size: 11px;
-      color: #666;
+      font-family: 'MarkOT', sans-serif;
+      font-weight: 500;
+      color: #000000;
       text-transform: uppercase;
       margin-bottom: 4px;
-      font-weight: 600;
     }
 
     .loading {
